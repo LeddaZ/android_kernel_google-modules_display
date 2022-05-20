@@ -458,18 +458,17 @@ static void s6e3fc3_panel_init(struct exynos_panel *ctx)
 			s6e3fc3_lhbm_gamma_write(ctx);
 }
 
-static u32 s6e3fc3_get_panel_rev(u32 id)
+static void s6e3fc3_get_panel_rev(struct exynos_panel *ctx, u32 id)
 {
-	u8 build_code;
-
 	/* extract command 0xDB */
-	build_code = (id & 0xFF00) >> 8;
+	u8 build_code = (id & 0xFF00) >> 8;
+	u8 rev = ((build_code & 0xE0) >> 3) | ((build_code & 0x0C) >> 2);
 
-	return (((build_code & 0xE0) >> 3) | ((build_code & 0x0C) >> 2));
+	exynos_panel_get_panel_rev(ctx, rev);
 }
 
 static const struct exynos_display_underrun_param underrun_param = {
-	.te_idle_us = 1000,
+	.te_idle_us = 700,
 	.te_var = 1,
 };
 
@@ -644,8 +643,8 @@ const struct exynos_panel_desc samsung_s6e3fc3 = {
 	.dft_brightness = 1023,
 	.brt_capability = &s6e3fc3_brightness_capability,
 	/* supported HDR format bitmask : 1(DOLBY_VISION), 2(HDR10), 3(HLG) */
-	.hdr_formats = BIT(2),
-	.max_luminance = 5400000,
+	.hdr_formats = BIT(2) | BIT(3),
+	.max_luminance = 8000000,
 	.max_avg_luminance = 1200000,
 	.min_luminance = 5,
 	.bl_range = s6e3fc3_bl_range,

@@ -73,7 +73,9 @@ static const struct of_device_id decon_driver_dt_match[] = {
 };
 MODULE_DEVICE_TABLE(of, decon_driver_dt_match);
 
-static void decon_mode_update_bts(struct decon_device *decon, const struct drm_display_mode *mode);
+static void decon_mode_update_bts(struct decon_device *decon,
+				const struct drm_display_mode *mode,
+				const unsigned int vblank_usec);
 static void decon_seamless_mode_set(struct exynos_drm_crtc *exynos_crtc,
 				    struct drm_crtc_state *old_crtc_state);
 static int decon_request_te_irq(struct exynos_drm_crtc *exynos_crtc,
@@ -149,6 +151,20 @@ static inline bool decon_is_te_enabled(const struct decon_device *decon)
 		(decon->config.mode.trig_mode == DECON_HW_TRIG);
 }
 
+void decon_enable_te_irq(struct decon_device *decon, bool enable)
+{
+	if (enable) {
+		if (atomic_inc_return(&decon->te_ref) == 1)
+			enable_irq(decon->irq_te);
+	} else {
+		int ret = atomic_dec_if_positive(&decon->te_ref);
+		if (!ret)
+			disable_irq_nosync(decon->irq_te);
+		else if (ret < 0)
+			WARN(1, "unbalanced te irq (%d)\n", ret);
+	}
+}
+
 static int decon_enable_vblank(struct exynos_drm_crtc *crtc)
 {
 	struct decon_device *decon = crtc->ctx;
@@ -158,8 +174,8 @@ static int decon_enable_vblank(struct exynos_drm_crtc *crtc)
 	hibernation_block(decon->hibernation);
 
 	if (decon_is_te_enabled(decon))
-		enable_irq(decon->irq_te);
-	else /* use framestart interrupt to track vsyncs */
+		decon_enable_te_irq(decon, true);
+	else /* if te is not enabled, use framestart interrupt to track vsyncs */
 		enable_irq(decon->irq_fs);
 
 	DPU_EVENT_LOG(DPU_EVT_VBLANK_ENABLE, decon->id, NULL);
@@ -176,8 +192,8 @@ static void decon_disable_vblank(struct exynos_drm_crtc *crtc)
 	decon_debug(decon, "%s +\n", __func__);
 
 	if (decon_is_te_enabled(decon))
-		disable_irq_nosync(decon->irq_te);
-	else
+		decon_enable_te_irq(decon, false);
+	else /* if te is not enabled, we're using framestart interrupt to track vsyncs */
 		disable_irq_nosync(decon->irq_fs);
 
 	DPU_EVENT_LOG(DPU_EVT_VBLANK_DISABLE, decon->id, NULL);
@@ -213,7 +229,9 @@ static int decon_get_crtc_out_type(const struct drm_crtc_state *crtc_state)
 			}
 
 			dsim = encoder_to_dsim(encoder);
-			if (dsim->id == 0) {
+			if (dsim->dual_dsi != DSIM_DUAL_DSI_NONE) {
+				out_type |= DECON_OUT_DSI;
+			} else if (dsim->id == 0) {
 				out_type |= DECON_OUT_DSI0;
 			} else if (dsim->id == 1) {
 				out_type |= DECON_OUT_DSI1;
@@ -266,6 +284,7 @@ static void decon_update_dsi_config(struct decon_config *config,
 		config->dsc.slice_height = exynos_mode->dsc.slice_height;
 		config->dsc.slice_width = DIV_ROUND_UP(config->image_width,
 						       config->dsc.slice_count);
+		config->dsc.cfg = exynos_mode->dsc.cfg;
 	}
 
 	is_vid_mode = (exynos_mode->mode_flags & MIPI_DSI_MODE_VIDEO) != 0;
@@ -283,6 +302,18 @@ static void decon_update_dsi_config(struct decon_config *config,
 	}
 }
 
+static int decon_get_main_dsim_id()
+{
+	const struct dsim_device *dsim = exynos_get_dual_dsi(DSIM_DUAL_DSI_MAIN);
+
+	if (!dsim) {
+		pr_err("%s: fail to get dsim, suppose dsim0\n", __func__);
+		return 0;
+	}
+
+	return dsim->id;
+}
+
 static void decon_update_config(struct decon_config *config,
 				const struct drm_crtc_state *crtc_state,
 				const struct exynos_drm_connector_state *exynos_conn_state)
@@ -293,12 +324,14 @@ static void decon_update_config(struct decon_config *config,
 	config->image_height = mode->vdisplay;
 
 	config->out_type = decon_get_crtc_out_type(crtc_state);
-	if (config->out_type == DECON_OUT_DSI)
+	if (config->out_type == DECON_OUT_DSI) {
 		config->mode.dsi_mode = DSI_MODE_DUAL_DSI;
-	else if (config->out_type & (DECON_OUT_DSI0 | DECON_OUT_DSI1))
+		config->main_dsim_id = decon_get_main_dsim_id();
+	} else if (config->out_type & (DECON_OUT_DSI0 | DECON_OUT_DSI1)) {
 		config->mode.dsi_mode = DSI_MODE_SINGLE;
-	else
+	} else {
 		config->mode.dsi_mode = DSI_MODE_NONE;
+	}
 
 	/* defaults if not dsi, if video mode or if hw trigger is not configured properly */
 	config->mode.trig_mode = DECON_SW_TRIG;
@@ -318,7 +351,6 @@ static void decon_update_config(struct decon_config *config,
 		decon_update_dsi_config(config, crtc_state, exynos_conn_state);
 
 	config->out_bpc = exynos_conn_state->exynos_mode.bpc;
-	config->vblank_usec = exynos_conn_state->exynos_mode.vblank_usec;
 }
 
 static bool decon_is_seamless_possible(const struct decon_device *decon,
@@ -777,7 +809,9 @@ static void _decon_enable(struct decon_device *decon)
 	decon_enable_irqs(decon);
 }
 
-static void decon_mode_update_bts(struct decon_device *decon, const struct drm_display_mode *mode)
+static void decon_mode_update_bts(struct decon_device *decon,
+				const struct drm_display_mode *mode,
+				const unsigned int vblank_usec)
 {
 	struct videomode vm;
 
@@ -787,6 +821,7 @@ static void decon_mode_update_bts(struct decon_device *decon, const struct drm_d
 	decon->bts.vfp = vm.vfront_porch;
 	decon->bts.vsa = vm.vsync_len;
 	decon->bts.fps = drm_mode_vrefresh(mode);
+	decon->bts.vblank_usec = vblank_usec;
 
 	decon->config.image_width = mode->hdisplay;
 	decon->config.image_height = mode->vdisplay;
@@ -795,22 +830,10 @@ static void decon_mode_update_bts(struct decon_device *decon, const struct drm_d
 		    mode->hdisplay, mode->vdisplay, decon->bts.fps);
 }
 
-static void decon_mode_set(struct exynos_drm_crtc *crtc,
-			   const struct drm_display_mode *mode,
-			   const struct drm_display_mode *adjusted_mode)
-{
-	struct decon_device *decon = crtc->ctx;
-	int i;
-
-	for (i = 0; i < MAX_WIN_PER_DECON; i++)
-		decon->bts.win_config[i].state = DPU_WIN_STATE_DISABLED;
-
-	decon_mode_update_bts(decon, adjusted_mode);
-}
-
 #if IS_ENABLED(CONFIG_EXYNOS_BTS)
 static void decon_seamless_mode_bts_update(struct decon_device *decon,
-					   const struct drm_display_mode *mode)
+					const struct drm_display_mode *mode,
+					const unsigned int vblank_usec)
 {
 	DPU_ATRACE_BEGIN(__func__);
 
@@ -825,23 +848,46 @@ static void decon_seamless_mode_bts_update(struct decon_device *decon,
 	 * 2 once the issue is clarified.
 	 */
 	if (decon->bts.fps > drm_mode_vrefresh(mode)) {
+		decon->bts.pending_vblank_usec = vblank_usec;
 		atomic_set(&decon->bts.delayed_update, 3);
 	} else {
-		decon_mode_update_bts(decon, mode);
+		decon_mode_update_bts(decon, mode, vblank_usec);
 		atomic_set(&decon->bts.delayed_update, 0);
 	}
 	DPU_ATRACE_END(__func__);
 }
 
+#define DEFAULT_VBLANK_USEC	100
+
+static unsigned int decon_get_vblank_usec(const struct drm_crtc_state *crtc_state,
+					const struct drm_atomic_state *old_state)
+{
+	const struct exynos_drm_connector_state *exynos_conn_state =
+			crtc_get_exynos_connector_state(old_state, crtc_state);
+
+	if (WARN_ON(!exynos_conn_state))
+		return DEFAULT_VBLANK_USEC;
+
+	return exynos_conn_state->exynos_mode.vblank_usec;
+}
+
 void decon_mode_bts_pre_update(struct decon_device *decon,
-				const struct drm_crtc_state *crtc_state)
+				const struct drm_crtc_state *crtc_state,
+				const struct drm_atomic_state *old_state)
 {
 	const struct exynos_drm_crtc_state *exynos_crtc_state = to_exynos_crtc_state(crtc_state);
 
-	if (exynos_crtc_state->seamless_mode_changed)
-		decon_seamless_mode_bts_update(decon, &crtc_state->adjusted_mode);
-	else if (!atomic_dec_if_positive(&decon->bts.delayed_update))
-		decon_mode_update_bts(decon, &crtc_state->mode);
+	if (exynos_crtc_state->seamless_mode_changed) {
+		unsigned int vblank_usec = decon_get_vblank_usec(crtc_state, old_state);
+
+		decon_seamless_mode_bts_update(decon, &crtc_state->adjusted_mode, vblank_usec);
+	} else if (drm_atomic_crtc_needs_modeset(crtc_state)) {
+		unsigned int vblank_usec = decon_get_vblank_usec(crtc_state, old_state);
+
+		decon_mode_update_bts(decon, &crtc_state->mode, vblank_usec);
+	} else if (!atomic_dec_if_positive(&decon->bts.delayed_update)) {
+		decon_mode_update_bts(decon, &crtc_state->mode, decon->bts.pending_vblank_usec);
+	}
 
 	decon->bts.ops->calc_bw(decon);
 	decon->bts.ops->update_bw(decon, false);
@@ -897,8 +943,10 @@ static void _decon_stop(struct decon_device *decon, bool reset)
 	 * Make sure all window connections are disabled when getting disabled,
 	 * in case there are any stale mappings.
 	 */
-	for (i = 0; i < MAX_WIN_PER_DECON; ++i)
+	for (i = 0; i < MAX_WIN_PER_DECON; ++i) {
+		decon->bts.win_config[i].state = DPU_WIN_STATE_DISABLED;
 		decon_reg_set_win_enable(decon->id, i, 0);
+	}
 
 	for (i = 0; i < decon->dpp_cnt; ++i) {
 		struct dpp_device *dpp = decon->dpp[i];
@@ -977,8 +1025,7 @@ static void decon_enable(struct exynos_drm_crtc *exynos_crtc, struct drm_crtc_st
 
 		decon_update_config(&decon->config, crtc_state, exynos_conn_state);
 
-		if ((decon->config.mode.op_mode == DECON_COMMAND_MODE) &&
-		    (decon->config.mode.trig_mode == DECON_HW_TRIG))
+		if (decon_is_te_enabled(decon))
 			decon_request_te_irq(exynos_crtc, exynos_conn_state);
 	}
 
@@ -1079,6 +1126,8 @@ static void decon_disable(struct exynos_drm_crtc *crtc)
 
 	if (crtc_state->mode_changed || crtc_state->connectors_changed) {
 		if (decon->irq_te >= 0) {
+			if (atomic_read(&decon->te_ref))
+				disable_irq(decon->irq_te);
 			devm_free_irq(decon->dev, decon->irq_te, decon);
 			decon->irq_te = -1;
 		}
@@ -1159,7 +1208,6 @@ static const struct exynos_drm_crtc_ops decon_crtc_ops = {
 	.disable = decon_disable,
 	.enable_vblank = decon_enable_vblank,
 	.disable_vblank = decon_disable_vblank,
-	.mode_set = decon_mode_set,
 	.atomic_check = decon_atomic_check,
 	.atomic_begin = decon_atomic_begin,
 	.update_plane = decon_update_plane,
@@ -1604,6 +1652,7 @@ static irqreturn_t decon_te_irq_handler(int irq, void *dev_id)
 		goto end;
 
 	DPU_EVENT_LOG(DPU_EVT_TE_INTERRUPT, decon->id, NULL);
+	DPU_ATRACE_INT_PID("TE", decon->d.te_cnt++ & 1, decon->thread->pid);
 
 	if (decon->config.mode.op_mode == DECON_COMMAND_MODE)
 		drm_crtc_handle_vblank(&decon->crtc->base);
@@ -1630,8 +1679,9 @@ static int decon_request_te_irq(struct exynos_drm_crtc *exynos_crtc,
 	ret = devm_request_irq(decon->dev, irq, decon_te_irq_handler, IRQF_TRIGGER_RISING,
 			       exynos_crtc->base.name, decon);
 	if (!ret) {
-		disable_irq(irq);
 		decon->irq_te = irq;
+		if (!atomic_read(&decon->te_ref))
+			disable_irq(irq);
 	}
 
 	return ret;
