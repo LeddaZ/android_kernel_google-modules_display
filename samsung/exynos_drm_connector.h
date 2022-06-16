@@ -13,7 +13,7 @@
 #include <drm/drm_atomic.h>
 #include <drm/drm_connector.h>
 #include <drm/samsung_drm.h>
-#include <drm/drm_dsc.h>
+#include <drm/display/drm_dsc.h>
 
 #define MIN_WIN_BLOCK_WIDTH	8
 #define MIN_WIN_BLOCK_HEIGHT	1

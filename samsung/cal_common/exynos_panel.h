@@ -14,7 +14,7 @@
 #define __EXYNOS_PANEL_H__
 
 #include <linux/kernel.h>
-#include <drm/drm_dsc.h>
+#include <drm/display/drm_dsc.h>
 
 enum type_of_ddi {
 	TYPE_OF_SM_DDI = 0,
