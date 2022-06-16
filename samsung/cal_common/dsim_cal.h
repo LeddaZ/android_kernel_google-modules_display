@@ -13,6 +13,7 @@
 #ifndef __SAMSUNG_DSIM_CAL_H__
 #define __SAMSUNG_DSIM_CAL_H__
 
+#include <drm/drm_print.h>
 #include <exynos_panel.h>
 
 #define MAX_DSI_CNT 2
