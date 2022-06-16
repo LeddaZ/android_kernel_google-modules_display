@@ -470,7 +470,7 @@ static int writeback_bind(struct device *dev, struct device *master, void *data)
 	drm_connector_helper_add(connector, &wb_connector_helper_funcs);
 	ret = drm_writeback_connector_init(drm_dev, &wb->writeback,
 			&wb_connector_funcs, &wb_encoder_helper_funcs,
-			wb->pixel_formats, wb->num_pixel_formats);
+			wb->pixel_formats, wb->num_pixel_formats, 0);
 	if (ret) {
 		pr_err("%s: failed to init writeback connector\n", __func__);
 		return ret;
