@@ -15,6 +15,7 @@
 #ifndef _EXYNOS_DRM_FB_H_
 #define _EXYNOS_DRM_FB_H_
 
+#include <drm/drm_framebuffer.h>
 #include <linux/dma-buf.h>
 
 #include "exynos_drm_gem.h"

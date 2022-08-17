@@ -17,6 +17,7 @@
 #define _EXYNOS_DRM_DRV_H_
 
 #include <drm/drm_atomic.h>
+#include <drm/drm_blend.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_plane.h>
 #include <drm/drm_property.h>
