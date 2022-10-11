@@ -897,7 +897,7 @@ ssize_t exynos_dsi_dcs_write_buffer(struct mipi_dsi_device *dsi,
 ssize_t exynos_dsi_cmd_send_flags(struct mipi_dsi_device *dsi, u16 flags);
 
 int exynos_panel_probe(struct mipi_dsi_device *dsi);
-int exynos_panel_remove(struct mipi_dsi_device *dsi);
+void exynos_panel_remove(struct mipi_dsi_device *dsi);
 
 static inline void exynos_dsi_dcs_write_buffer_force_batch_begin(struct mipi_dsi_device *dsi)
 {

@@ -3760,7 +3760,7 @@ int exynos_panel_probe(struct mipi_dsi_device *dsi)
 }
 EXPORT_SYMBOL(exynos_panel_probe);
 
-int exynos_panel_remove(struct mipi_dsi_device *dsi)
+void exynos_panel_remove(struct mipi_dsi_device *dsi)
 {
 	struct exynos_panel *ctx = mipi_dsi_get_drvdata(dsi);
 
@@ -3771,8 +3771,6 @@ int exynos_panel_remove(struct mipi_dsi_device *dsi)
 	sysfs_remove_groups(&ctx->bl->dev.kobj, bl_device_groups);
 	sysfs_remove_file(&ctx->bl->dev.kobj, &dev_attr_cabc_mode.attr);
 	devm_backlight_device_unregister(ctx->dev, ctx->bl);
-
-	return 0;
 }
 EXPORT_SYMBOL(exynos_panel_remove);
 
