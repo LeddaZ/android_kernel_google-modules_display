@@ -2049,7 +2049,7 @@ static int panel_debugfs_add(struct exynos_panel *ctx, struct dentry *parent)
 {
 	const struct exynos_panel_desc *desc = ctx->desc;
 	const struct exynos_panel_funcs *funcs = desc->exynos_panel_func;
-	struct dentry *root;
+	struct dentry *cmdset_root;
 
 	debugfs_create_u32("rev", 0600, parent, &ctx->panel_rev);
 
@@ -2059,21 +2059,20 @@ static int panel_debugfs_add(struct exynos_panel *ctx, struct dentry *parent)
 	if (funcs->print_gamma)
 		debugfs_create_file("gamma", 0600, parent, ctx, &panel_gamma_fops);
 
-	root = debugfs_create_dir("cmdsets", ctx->debugfs_entry);
-	if (!root) {
+	cmdset_root = debugfs_create_dir("cmdsets", parent);
+	if (!cmdset_root) {
 		dev_err(ctx->dev, "can't create cmdset dir\n");
 		return -EFAULT;
 	}
-	ctx->debugfs_cmdset_entry = root;
 
-	exynos_panel_debugfs_create_cmdset(ctx, root, desc->off_cmd_set, "off");
+	exynos_panel_debugfs_create_cmdset(ctx, cmdset_root, desc->off_cmd_set, "off");
 
 	if (desc->lp_mode) {
 		struct dentry *lpd;
 		int i;
 
 		if (desc->binned_lp) {
-			lpd = debugfs_create_dir("lp", root);
+			lpd = debugfs_create_dir("lp", cmdset_root);
 			if (!lpd) {
 				dev_err(ctx->dev, "can't create lp dir\n");
 				return -EFAULT;
@@ -2085,7 +2084,7 @@ static int panel_debugfs_add(struct exynos_panel *ctx, struct dentry *parent)
 				exynos_panel_debugfs_create_cmdset(ctx, lpd, &b->cmd_set, b->name);
 			}
 		} else {
-			lpd = root;
+			lpd = cmdset_root;
 		}
 		exynos_panel_debugfs_create_cmdset(ctx, lpd, desc->lp_cmd_set, "lp_entry");
 	}
@@ -2396,7 +2395,7 @@ static const struct file_operations exynos_op_hz_fops = {
 };
 
 static int exynos_dsi_debugfs_add(struct mipi_dsi_device *dsi,
-			 struct dentry *parent)
+				  struct dentry *parent)
 {
 	struct dentry *reg_root;
 	struct exynos_dsi_reg_data *reg_data;
@@ -2428,32 +2427,6 @@ static int exynos_dsi_debugfs_add(struct mipi_dsi_device *dsi,
 
 	return 0;
 }
-
-static int exynos_debugfs_panel_add(struct exynos_panel *ctx, struct dentry *parent)
-{
-	struct dentry *root;
-
-	if (!parent)
-		return -EINVAL;
-
-	root = debugfs_create_dir("panel", parent);
-	if (!root)
-		return -EPERM;
-
-	ctx->debugfs_entry = root;
-
-	return 0;
-}
-
-static void exynos_debugfs_panel_remove(struct exynos_panel *ctx)
-{
-	if (!ctx->debugfs_entry)
-		return;
-
-	debugfs_remove_recursive(ctx->debugfs_entry);
-
-	ctx->debugfs_entry = NULL;
-}
 #else
 static int panel_debugfs_add(struct exynos_panel *ctx, struct dentry *parent)
 {
@@ -2464,16 +2437,6 @@ static int exynos_dsi_debugfs_add(struct mipi_dsi_device *dsi,
 			 struct dentry *parent)
 {
 	return 0;
-}
-
-static int exynos_debugfs_panel_add(struct exynos_panel *ctx, struct dentry *parent)
-{
-	return 0;
-}
-
-static void exynos_debugfs_panel_remove(struct exynos_panel *ctx)
-{
-	return;
 }
 #endif
 
@@ -3070,6 +3033,20 @@ static const char *exynos_panel_get_sysfs_name(struct exynos_panel *ctx)
 	return "primary-panel";
 }
 
+static void exynos_panel_debugfs_init(struct drm_bridge *bridge,
+				      struct dentry *root)
+{
+	struct exynos_panel *ctx = bridge_to_exynos_panel(bridge);
+	struct dentry *panel_root;
+
+	panel_root = debugfs_create_dir("panel", root);
+	panel_debugfs_add(ctx, panel_root);
+	if (ctx->desc->panel_func->debugfs_init)
+		ctx->desc->panel_func->debugfs_init(&ctx->panel, root);
+
+	exynos_dsi_debugfs_add(to_mipi_dsi_device(ctx->dev), panel_root);
+}
+
 static int exynos_panel_bridge_attach(struct drm_bridge *bridge,
 				      enum drm_bridge_attach_flags flags)
 {
@@ -3110,12 +3087,9 @@ static int exynos_panel_bridge_attach(struct drm_bridge *bridge,
 	if (ret)
 		dev_warn(ctx->dev, "unable to link panel sysfs (%d)\n", ret);
 
-	exynos_debugfs_panel_add(ctx, connector->debugfs_entry);
-	exynos_dsi_debugfs_add(to_mipi_dsi_device(ctx->dev), ctx->debugfs_entry);
-	panel_debugfs_add(ctx, ctx->debugfs_entry);
+	exynos_panel_debugfs_init(bridge, connector->debugfs_entry);
 
 	drm_kms_helper_hotplug_event(connector->dev);
-
 
 	ret = sysfs_create_link(&bridge->dev->dev->kobj, &ctx->dev->kobj, sysfs_name);
 	if (ret)
@@ -3129,15 +3103,9 @@ static int exynos_panel_bridge_attach(struct drm_bridge *bridge,
 static void exynos_panel_bridge_detach(struct drm_bridge *bridge)
 {
 	struct exynos_panel *ctx = bridge_to_exynos_panel(bridge);
-	struct drm_connector *connector = &ctx->exynos_connector.base;
 	const char *sysfs_name = exynos_panel_get_sysfs_name(ctx);
 
 	sysfs_remove_link(&bridge->dev->dev->kobj, sysfs_name);
-
-	exynos_debugfs_panel_remove(ctx);
-	sysfs_remove_link(&connector->kdev->kobj, "panel");
-	drm_connector_unregister(connector);
-	drm_connector_cleanup(&ctx->exynos_connector.base);
 }
 
 static void exynos_panel_bridge_enable(struct drm_bridge *bridge,

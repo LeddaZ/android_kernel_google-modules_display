@@ -1203,6 +1203,7 @@ static const struct exynos_panel_mode s6e3hc3_lp_mode = {
 };
 
 static void s6e3hc3_panel_mode_create_cmdset(struct exynos_panel *ctx,
+					     struct dentry *parent,
 					     const struct exynos_panel_mode *pmode)
 {
 	struct dentry *root;
@@ -1211,7 +1212,7 @@ static void s6e3hc3_panel_mode_create_cmdset(struct exynos_panel *ctx,
 	if (!mdata)
 		return;
 
-	root = debugfs_create_dir(pmode->mode.name, ctx->debugfs_cmdset_entry);
+	root = debugfs_create_dir(pmode->mode.name, parent);
 	if (!root) {
 		dev_err(ctx->dev, "unable to create %s mode debugfs dir\n", pmode->mode.name);
 		return;
@@ -1224,13 +1225,29 @@ static void s6e3hc3_panel_mode_create_cmdset(struct exynos_panel *ctx,
 	exynos_panel_debugfs_create_cmdset(ctx, root, mdata->wakeup_mode_cmd_set, "wakeup");
 }
 
-static void s6e3hc3_panel_init(struct exynos_panel *ctx)
+static void s6e3hc3_debugfs_init(struct drm_panel *panel, struct dentry *root)
 {
-	struct dentry *csroot = ctx->debugfs_cmdset_entry;
-	struct s6e3hc3_panel *spanel = to_spanel(ctx);
+	struct exynos_panel *ctx = container_of(panel, struct exynos_panel, panel);
+	struct dentry *panel_root, *csroot;
+	struct s6e3hc3_panel *spanel;
 	int i;
 
-	debugfs_create_bool("force_changeable_te", 0644, ctx->debugfs_entry,
+	if (!ctx)
+		return;
+
+	panel_root = debugfs_lookup("panel", root);
+	if (!panel_root)
+		return;
+
+	csroot = debugfs_lookup("cmdsets", panel_root);
+	if (!csroot) {
+		dput(panel_root);
+		return;
+	}
+
+	spanel = to_spanel(ctx);
+
+	debugfs_create_bool("force_changeable_te", 0644, panel_root,
 			    &spanel->force_changeable_te);
 	exynos_panel_debugfs_create_cmdset(ctx, csroot, &s6e3hc3_init_cmd_set, "init");
 	exynos_panel_debugfs_create_cmdset(ctx, csroot, &s6e3hc3_early_exit_enable_cmd_set,
@@ -1238,7 +1255,14 @@ static void s6e3hc3_panel_init(struct exynos_panel *ctx)
 	exynos_panel_debugfs_create_cmdset(ctx, csroot, &s6e3hc3_early_exit_disable_cmd_set,
 					   "early_exit_disable");
 	for (i = 0; i < ctx->desc->num_modes; i++)
-		s6e3hc3_panel_mode_create_cmdset(ctx, &ctx->desc->modes[i]);
+		s6e3hc3_panel_mode_create_cmdset(ctx, csroot, &ctx->desc->modes[i]);
+
+	dput(csroot);
+	dput(panel_root);
+}
+
+static void s6e3hc3_panel_init(struct exynos_panel *ctx)
+{
 	if (is_local_gamma_supported(ctx))
 		if (!s6e3hc3_lhbm_gamma_read(ctx))
 			s6e3hc3_lhbm_gamma_write(ctx);
@@ -1261,6 +1285,7 @@ static const struct drm_panel_funcs s6e3hc3_drm_funcs = {
 	.prepare = exynos_panel_prepare,
 	.enable = s6e3hc3_enable,
 	.get_modes = exynos_panel_get_modes,
+	.debugfs_init = s6e3hc3_debugfs_init,
 };
 
 static const struct exynos_panel_funcs s6e3hc3_exynos_funcs = {

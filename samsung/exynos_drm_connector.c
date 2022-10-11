@@ -35,6 +35,14 @@ exynos_drm_connector_get_properties(struct exynos_drm_connector *exynos_connecto
 }
 EXPORT_SYMBOL(exynos_drm_connector_get_properties);
 
+static void exynos_drm_connector_destroy(struct drm_connector *connector)
+{
+	sysfs_remove_link(&connector->kdev->kobj, "panel");
+
+	drm_connector_unregister(connector);
+	drm_connector_cleanup(connector);
+}
+
 static void exynos_drm_connector_destroy_state(struct drm_connector *connector,
 					  struct drm_connector_state *connector_state)
 {
@@ -133,6 +141,7 @@ static void exynos_drm_connector_print_state(struct drm_printer *p,
 static const struct drm_connector_funcs exynos_drm_connector_funcs = {
 	.fill_modes = drm_helper_probe_single_connector_modes,
 	.reset = exynos_drm_connector_reset,
+	.destroy = exynos_drm_connector_destroy,
 	.atomic_duplicate_state = exynos_drm_connector_duplicate_state,
 	.atomic_destroy_state = exynos_drm_connector_destroy_state,
 	.atomic_get_property = exynos_drm_connector_get_property,

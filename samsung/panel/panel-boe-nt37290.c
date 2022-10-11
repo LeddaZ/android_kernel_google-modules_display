@@ -1759,12 +1759,22 @@ static const struct exynos_panel_mode nt37290_lp_modes[] = {
 	},
 };
 
+static void nt37290_debugfs_init(struct drm_panel *panel, struct dentry *root)
+{
+	struct exynos_panel *ctx = container_of(panel, struct exynos_panel, panel);
+	struct dentry *csroot = debugfs_lookup("cmdsets", root);
+
+	if (!csroot || !ctx)
+		return;
+
+	exynos_panel_debugfs_create_cmdset(ctx, csroot, &nt37290_init_cmd_set, "init");
+	dput(csroot);
+}
+
 static void nt37290_panel_init(struct exynos_panel *ctx)
 {
 	struct nt37290_panel *spanel = to_spanel(ctx);
-	struct dentry *csroot = ctx->debugfs_cmdset_entry;
 
-	exynos_panel_debugfs_create_cmdset(ctx, csroot, &nt37290_init_cmd_set, "init");
 	exynos_panel_send_cmd_set(ctx, &nt37290_dsc_init_cmd_set);
 	exynos_panel_send_cmd_set(ctx, &nt37290_lhbm_on_setting_cmd_set);
 
@@ -1794,6 +1804,7 @@ static const struct drm_panel_funcs nt37290_drm_funcs = {
 	.prepare = exynos_panel_prepare,
 	.enable = nt37290_enable,
 	.get_modes = exynos_panel_get_modes,
+	.debugfs_init = nt37290_debugfs_init,
 };
 
 static const struct exynos_panel_funcs nt37290_exynos_funcs = {

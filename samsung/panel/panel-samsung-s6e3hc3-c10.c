@@ -1235,14 +1235,33 @@ static const struct exynos_panel_mode s6e3hc3_c10_lp_modes[] = {
 	},
 };
 
-static void s6e3hc3_c10_panel_init(struct exynos_panel *ctx)
+static void s6e3hc3_debugfs_init(struct drm_panel *panel, struct dentry *root)
 {
-	struct dentry *csroot = ctx->debugfs_cmdset_entry;
-	struct s6e3hc3_c10_panel *spanel = to_spanel(ctx);
+	struct exynos_panel *ctx = container_of(panel, struct exynos_panel, panel);
+	struct dentry *panel_root, *csroot;
+	struct s6e3hc3_c10_panel *spanel;
+
+	if (!ctx)
+		return;
+
+	panel_root = debugfs_lookup("panel", root);
+	if (!panel_root)
+		return;
+
+	csroot = debugfs_lookup("cmdsets", panel_root);
+	if (!csroot) {
+		dput(panel_root);
+		return;
+	}
+
+	spanel = to_spanel(ctx);
 
 	exynos_panel_debugfs_create_cmdset(ctx, csroot, &s6e3hc3_c10_init_cmd_set, "init");
-	debugfs_create_bool("force_changeable_te", 0644, ctx->debugfs_entry,
-				&spanel->force_changeable_te);
+	debugfs_create_bool("force_changeable_te", 0644, panel_root,
+			    &spanel->force_changeable_te);
+
+	dput(csroot);
+	dput(panel_root);
 }
 
 static int s6e3hc3_c10_panel_probe(struct mipi_dsi_device *dsi)
@@ -1264,6 +1283,7 @@ static const struct drm_panel_funcs s6e3hc3_c10_drm_funcs = {
 	.prepare = exynos_panel_prepare,
 	.enable = s6e3hc3_c10_enable,
 	.get_modes = exynos_panel_get_modes,
+	.debugfs_init = s6e3hc3_debugfs_init,
 };
 
 static const struct exynos_panel_funcs s6e3hc3_c10_exynos_funcs = {
@@ -1276,7 +1296,6 @@ static const struct exynos_panel_funcs s6e3hc3_c10_exynos_funcs = {
 	.set_local_hbm_mode = s6e3hc3_c10_set_local_hbm_mode,
 	.is_mode_seamless = s6e3hc3_c10_is_mode_seamless,
 	.mode_set = s6e3hc3_c10_mode_set,
-	.panel_init = s6e3hc3_c10_panel_init,
 	.get_panel_rev = s6e3hc3_c10_get_panel_rev,
 	.get_te2_edges = exynos_panel_get_te2_edges,
 	.configure_te2_edges = exynos_panel_configure_te2_edges,
