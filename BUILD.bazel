@@ -40,10 +40,10 @@ kernel_module(
         "samsung/panel/panel-samsung-sofef01.ko",
     ],
     kernel_build = "//gs/google-modules/soc-modules:slider",
-    kernel_module_deps = [
-        "//gs/google-modules/soc-modules:gs101_soc",
-    ],
     visibility = [
         "//gs/google-modules/soc-modules:__pkg__",
+    ],
+    deps = [
+        "//gs/google-modules/soc-modules:gs101_soc",
     ],
 )
