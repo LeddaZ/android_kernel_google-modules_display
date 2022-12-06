@@ -1102,7 +1102,7 @@ static void exynos_debugfs_add_lut(const char *name, umode_t mode,
 		}
 	}
 
-	memcpy(lut->name, name, MAX_NAME_SIZE);
+	strncpy(lut->name, name, MAX_NAME_SIZE);
 	lut->lut_ptr = lut_ptr;
 	lut->dlut_ptr = dlut_ptr;
 	lut->elem_size = elem_size;
