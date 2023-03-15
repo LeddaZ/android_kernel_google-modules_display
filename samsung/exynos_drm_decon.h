@@ -332,6 +332,7 @@ struct dpu_log_crtc_info {
 	bool mode_changed;
 	bool active_changed;
 	bool self_refresh;
+	bool connectors_changed;
 };
 
 struct dpu_log_freqs {
