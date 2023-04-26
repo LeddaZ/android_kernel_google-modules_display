@@ -18,6 +18,7 @@
 #include "regs-dsim.h"
 #include <dsim_cal.h>
 #include <cal_config.h>
+#include <soc/google/debug-snapshot.h>
 
 static struct cal_regs_desc regs_desc[REGS_DSIM_TYPE_MAX][MAX_DSI_CNT];
 
@@ -780,8 +781,11 @@ static int dsim_reg_enable_pll(u32 id, u32 en)
 
 	dsim_reg_set_pll(id, en);
 	if (en ^ dsim_reg_get_pll_en(id)) {
-		WARN(1, "dsim%u: PLL_EN is not %s\n",
-				id, en ? "enable" : "disable");
+		char dsim_msg[40];
+
+		scnprintf(dsim_msg, sizeof(dsim_msg),
+			"dsim%u: PLL_EN is not %sable\n", id, en ? "en" : "dis");
+		dbg_snapshot_emergency_reboot(dsim_msg);
 		return -EINVAL;
 	}
 	ret = readl_poll_timeout_atomic(
