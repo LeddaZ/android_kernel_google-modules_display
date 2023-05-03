@@ -13,6 +13,7 @@
 #ifndef __SAMSUNG_DSIM_CAL_H__
 #define __SAMSUNG_DSIM_CAL_H__
 
+#include <drm/drm_print.h>
 #include <exynos_panel.h>
 
 #define MAX_DSI_CNT 2
@@ -190,6 +191,7 @@ struct dsim_reg_config {
 	unsigned int		bpp;
 	unsigned int num_dphy_diags;
 	struct dsim_dphy_diag *dphy_diags;
+	bool			dual_dsi;
 };
 
 void dsim_regs_desc_init(void __iomem *reg_base, phys_addr_t start,
@@ -240,7 +242,7 @@ void dsim_reg_set_cmd_transfer_mode(u32 id, u32 lp);
 void dsim_reg_set_dphy_freq_hopping(u32 id, u32 p, u32 m, u32 k, u32 en);
 
 /* DSIM SFR dump */
-void __dsim_dump(u32 id, struct dsim_regs *regs);
+void __dsim_dump(struct drm_printer *p, u32 id, struct dsim_regs *regs);
 
 /* For dphy diagnosis */
 u32 diag_dsim_dphy_reg_read_mask(u32 id, u16 offset, u32 mask);

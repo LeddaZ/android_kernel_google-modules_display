@@ -54,12 +54,18 @@ static inline bool is_hibernaton_blocked(struct exynos_hibernation *hiber)
 		(hiber->decon->state != DECON_STATE_ON);
 }
 
+static inline bool is_dqe_dimming_in_progress(struct decon_device *decon)
+{
+	return (decon->dqe &&
+		dqe_reg_dimming_in_progress(decon->id));
+}
+
 static bool exynos_hibernation_check(struct exynos_hibernation *hiber)
 {
 	pr_debug("%s +\n", __func__);
 
 	return (!is_camera_operating(hiber) &&
-		!dqe_reg_dimming_in_progress());
+		!is_dqe_dimming_in_progress(hiber->decon));
 }
 
 static inline void hibernation_unblock(struct exynos_hibernation *hiber)
@@ -174,16 +180,19 @@ static int exynos_hibernation_enter(struct exynos_hibernation *hiber, bool nonbl
 	return ret;
 }
 
-static void exynos_hibernation_exit(struct exynos_hibernation *hiber)
+static int exynos_hibernation_exit(struct exynos_hibernation *hiber, bool nonblock)
 {
 	struct decon_device *decon = hiber->decon;
+	int ret;
 
 	DPU_ATRACE_BEGIN(__func__);
-	exynos_crtc_self_refresh_update(&decon->crtc->base, false, false);
+	ret = exynos_crtc_self_refresh_update(&decon->crtc->base, false, nonblock);
 	DPU_ATRACE_END(__func__);
 
 	pr_debug("%s: DPU power %s\n", __func__,
 			pm_runtime_active(decon->dev) ? "on" : "off");
+
+	return ret;
 }
 
 static bool exynos_hibernation_cancel(struct exynos_hibernation *hiber)
@@ -235,17 +244,24 @@ static bool hibernation_block_sync(struct exynos_hibernation *hiber)
 	return ret;
 }
 
-void hibernation_block_exit(struct exynos_hibernation *hiber)
+static bool _hibernation_block_exit(struct exynos_hibernation *hiber, bool nonblock)
 {
 	bool hibernation_on;
 
 	if (!hiber)
-		return;
+		return false;
 
 	hibernation_on = hibernation_block_sync(hiber);
 
 	if (hibernation_on && hiber->funcs)
-		hiber->funcs->exit(hiber);
+		return !hiber->funcs->exit(hiber, nonblock);
+
+	return hibernation_on;
+}
+
+void hibernation_block_exit(struct exynos_hibernation *hiber)
+{
+	_hibernation_block_exit(hiber, false);
 }
 
 void hibernation_unblock_enter(struct exynos_hibernation *hiber)
@@ -260,6 +276,15 @@ void hibernation_unblock_enter(struct exynos_hibernation *hiber)
 			msecs_to_jiffies(HIBERNATION_ENTRY_MIN_TIME_MS));
 
 	pr_debug("%s: block_cnt(%d)\n", __func__, atomic_read(&hiber->block_cnt));
+}
+
+bool exynos_hibernation_async_exit(struct exynos_hibernation *hiber)
+{
+	bool hibernation_on = _hibernation_block_exit(hiber, true);
+
+	hibernation_unblock_enter(hiber);
+
+	return hibernation_on;
 }
 
 static const struct exynos_hibernation_funcs hibernation_funcs = {

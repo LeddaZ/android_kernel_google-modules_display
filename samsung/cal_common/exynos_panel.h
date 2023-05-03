@@ -14,6 +14,7 @@
 #define __EXYNOS_PANEL_H__
 
 #include <linux/kernel.h>
+#include <drm/display/drm_dsc.h>
 
 enum type_of_ddi {
 	TYPE_OF_SM_DDI = 0,
@@ -78,6 +79,9 @@ struct exynos_dsc {
 	u32 slice_count;
 	u32 slice_width;
 	u32 slice_height;
+	const struct drm_dsc_config *cfg;
+
+	unsigned int delay_reg_init_us;
 };
 
 /* return compressed DSC slice width */

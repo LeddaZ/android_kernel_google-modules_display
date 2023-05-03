@@ -40,21 +40,28 @@
 #include "exynos_drm_format.h"
 #include "exynos_drm_writeback.h"
 
-static inline bool wb_is_cwb(const struct writeback_device *wb)
+static inline int wb_check_type(const struct writeback_device *wb, bool *is_cwb)
 {
 	const struct decon_device *decon = wb_get_decon(wb);
 
-	return decon->config.out_type != DECON_OUT_WB;
+	if (unlikely(!decon)) {
+		pr_err("%s: unable to get decon\n", __func__);
+		return -EINVAL;
+	}
+
+	*is_cwb = decon->config.out_type != DECON_OUT_WB;
+
+	return 0;
 }
 
-void wb_dump(struct writeback_device *wb)
+void wb_dump(struct drm_printer *p, struct writeback_device *wb)
 {
 	if (wb->state != WB_STATE_ON) {
 		pr_info("writeback state is off\n");
 		return;
 	}
 
-	__dpp_dump(wb->id, wb->regs.dpp_base_regs, wb->regs.dma_base_regs,
+	__dpp_dump(p, wb->id, wb->regs.dpp_base_regs, wb->regs.dma_base_regs,
 			wb->attr);
 }
 
@@ -69,6 +76,7 @@ static const struct of_device_id wb_of_match[] = {
 		/* TODO : check odma, wbmux, decon_win restriction */
 		.data = &dpp_drv_data,
 	},
+	{ /* sentinel */ },
 };
 
 static int writeback_get_modes(struct drm_connector *connector)
@@ -307,6 +315,11 @@ static void writeback_enable(struct drm_encoder *encoder)
 
 	_writeback_enable(wb);
 	decon = wb_get_decon(wb);
+	if (unlikely(!decon)) {
+		pr_err("%s: unable to get decon\n", __func__);
+		return;
+	}
+
 	wb->decon_id = decon->id;
 	wb->state = WB_STATE_ON;
 	DPU_EVENT_LOG(DPU_EVT_WB_ENABLE, wb->decon_id, wb);
@@ -469,7 +482,7 @@ static int writeback_bind(struct device *dev, struct device *master, void *data)
 	drm_connector_helper_add(connector, &wb_connector_helper_funcs);
 	ret = drm_writeback_connector_init(drm_dev, &wb->writeback,
 			&wb_connector_funcs, &wb_encoder_helper_funcs,
-			wb->pixel_formats, wb->num_pixel_formats);
+			wb->pixel_formats, wb->num_pixel_formats, 0);
 	if (ret) {
 		pr_err("%s: failed to init writeback connector\n", __func__);
 		return ret;
@@ -570,12 +583,14 @@ static irqreturn_t odma_irq_handler(int irq, void *priv)
 	irqs = odma_reg_get_irq_and_clear(wb->id);
 
 	if (irqs & ODMA_STATUS_FRAMEDONE_IRQ || irqs & ODMA_INST_OFF_DONE_IRQ) {
+		bool is_cwb;
+
 		if (irqs & ODMA_STATUS_FRAMEDONE_IRQ)
 			pr_debug("wb(%d) framedone irq occurs\n", wb->id);
 		else
 			pr_warn("wb(%d) instant off irq occurs\n", wb->id);
 
-		if (wb_is_cwb(wb))
+		if (wb_check_type(wb, &is_cwb) || is_cwb)
 			decon_reg_set_cwb_enable(wb->decon_id, false);
 
 		drm_writeback_signal_completion(&wb->writeback, 0);

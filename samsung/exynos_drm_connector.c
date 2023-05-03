@@ -35,6 +35,14 @@ exynos_drm_connector_get_properties(struct exynos_drm_connector *exynos_connecto
 }
 EXPORT_SYMBOL(exynos_drm_connector_get_properties);
 
+static void exynos_drm_connector_destroy(struct drm_connector *connector)
+{
+	sysfs_remove_link(&connector->kdev->kobj, "panel");
+
+	drm_connector_unregister(connector);
+	drm_connector_cleanup(connector);
+}
+
 static void exynos_drm_connector_destroy_state(struct drm_connector *connector,
 					  struct drm_connector_state *connector_state)
 {
@@ -78,6 +86,8 @@ exynos_drm_connector_duplicate_state(struct drm_connector *connector)
 
 	/* clear pending update */
 	copy->pending_update_flags = 0;
+
+	copy->mipi_sync = 0;
 
 	return &copy->base;
 }
@@ -131,6 +141,7 @@ static void exynos_drm_connector_print_state(struct drm_printer *p,
 static const struct drm_connector_funcs exynos_drm_connector_funcs = {
 	.fill_modes = drm_helper_probe_single_connector_modes,
 	.reset = exynos_drm_connector_reset,
+	.destroy = exynos_drm_connector_destroy,
 	.atomic_duplicate_state = exynos_drm_connector_duplicate_state,
 	.atomic_destroy_state = exynos_drm_connector_destroy_state,
 	.atomic_get_property = exynos_drm_connector_get_property,
@@ -167,6 +178,12 @@ static int exynos_drm_connector_create_brightness_properties(struct drm_device *
 		{ HBM_ON_IRC_ON, "On IRC On" },
 		{ HBM_ON_IRC_OFF, "On IRC Off" },
 	};
+	static const struct drm_prop_enum_list mipi_sync_list[] = {
+		{ __builtin_ffs(MIPI_CMD_SYNC_REFRESH_RATE) - 1, "sync_refresh_rate" },
+		{ __builtin_ffs(MIPI_CMD_SYNC_LHBM) - 1, "sync_lhbm" },
+		{ __builtin_ffs(MIPI_CMD_SYNC_GHBM) - 1, "sync_ghbm" },
+		{ __builtin_ffs(MIPI_CMD_SYNC_BL) - 1, "sync_bl" },
+	};
 
 	prop = drm_property_create(dev, DRM_MODE_PROP_BLOB|DRM_MODE_PROP_IMMUTABLE,
 		 "brightness_capability", 0);
@@ -197,10 +214,14 @@ static int exynos_drm_connector_create_brightness_properties(struct drm_device *
 		return -ENOMEM;
 	p->brightness_level = prop;
 
-	prop = drm_property_create_bool(dev, 0, "sync_rr_switch");
+	prop = drm_property_create_bitmask(
+		dev, 0, "mipi_sync", mipi_sync_list,
+		ARRAY_SIZE(mipi_sync_list),
+		MIPI_CMD_SYNC_REFRESH_RATE | MIPI_CMD_SYNC_LHBM | MIPI_CMD_SYNC_GHBM |
+				MIPI_CMD_SYNC_BL);
 	if (!prop)
 		return -ENOMEM;
-	p->sync_rr_switch = prop;
+	p->mipi_sync = prop;
 
 	return 0;
 }
@@ -245,13 +266,32 @@ static int exynos_drm_connector_create_luminance_properties(struct drm_device *d
 	return 0;
 }
 
+static int exynos_drm_connector_create_orientation_property(struct drm_device *dev)
+{
+	struct exynos_drm_connector_properties *p = dev_get_exynos_connector_properties(dev);
+	static const struct drm_prop_enum_list drm_panel_orientation_enum_list[] = {
+		{ DRM_MODE_PANEL_ORIENTATION_NORMAL,	"Normal"	},
+		{ DRM_MODE_PANEL_ORIENTATION_BOTTOM_UP,	"Upside Down"	},
+		{ DRM_MODE_PANEL_ORIENTATION_LEFT_UP,	"Left Side Up"	},
+		{ DRM_MODE_PANEL_ORIENTATION_RIGHT_UP,	"Right Side Up"	},
+	};
+
+	p->panel_orientation = drm_property_create_enum(dev, DRM_MODE_PROP_IMMUTABLE,
+						"panel orientation",
+						drm_panel_orientation_enum_list,
+						ARRAY_SIZE(drm_panel_orientation_enum_list));
+	if (!p->panel_orientation)
+		return -ENOMEM;
+
+	return 0;
+}
+
 int exynos_drm_connector_create_properties(struct drm_device *dev)
 {
 	struct exynos_drm_connector_properties *p = dev_get_exynos_connector_properties(dev);
 	int ret;
 
-	p->lp_mode = drm_property_create(dev, DRM_MODE_PROP_IMMUTABLE | DRM_MODE_PROP_BLOB,
-					 "lp_mode", 0);
+	p->lp_mode = drm_property_create(dev, DRM_MODE_PROP_BLOB, "lp_mode", 0);
 	if (IS_ERR(p->lp_mode))
                 return PTR_ERR(p->lp_mode);
 
@@ -260,11 +300,25 @@ int exynos_drm_connector_create_properties(struct drm_device *dev)
 	if (IS_ERR(p->is_partial))
 		return PTR_ERR(p->is_partial);
 
+	p->panel_idle_support = drm_property_create_bool(dev, DRM_MODE_PROP_IMMUTABLE,
+			"panel_idle_support");
+	if (IS_ERR(p->panel_idle_support))
+		return PTR_ERR(p->panel_idle_support);
+
+	p->vrr_switch_duration = drm_property_create_range(dev, DRM_MODE_PROP_IMMUTABLE,
+						"vrr_switch_duration", 0, UINT_MAX);
+	if (IS_ERR(p->vrr_switch_duration))
+		return PTR_ERR(p->vrr_switch_duration);
+
 	ret = exynos_drm_connector_create_luminance_properties(dev);
 	if (ret)
 		return ret;
 
 	ret = exynos_drm_connector_create_brightness_properties(dev);
+	if (ret)
+		return ret;
+
+	ret = exynos_drm_connector_create_orientation_property(dev);
 	if (ret)
 		return ret;
 

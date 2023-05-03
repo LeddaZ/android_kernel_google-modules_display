@@ -10,6 +10,7 @@
  */
 
 #include <drm/drm_vblank.h>
+#include <linux/debugfs.h>
 #include <linux/module.h>
 #include <linux/of_platform.h>
 #include <video/mipi_display.h>
@@ -292,6 +293,7 @@ static void s6e3fc3_set_nolp_mode(struct exynos_panel *ctx,
 		return;
 
 	EXYNOS_DCS_WRITE_TABLE(ctx, display_off);
+	/* backlight control and dimming */
 	s6e3fc3_update_wrctrld(ctx);
 	s6e3fc3_change_frequency(ctx, vrefresh);
 	usleep_range(delay_us, delay_us + 10);
@@ -415,7 +417,13 @@ static void s6e3fc3_set_hbm_mode(struct exynos_panel *exynos_panel,
 static void s6e3fc3_set_dimming_on(struct exynos_panel *exynos_panel,
 				 bool dimming_on)
 {
+	const struct exynos_panel_mode *pmode = exynos_panel->current_mode;
+
 	exynos_panel->dimming_on = dimming_on;
+	if (pmode->exynos_mode.is_lp_mode) {
+		dev_info(exynos_panel->dev,"in lp mode, skip to update");
+		return;
+	}
 
 	s6e3fc3_update_wrctrld(exynos_panel);
 }
@@ -423,8 +431,26 @@ static void s6e3fc3_set_dimming_on(struct exynos_panel *exynos_panel,
 static void s6e3fc3_set_local_hbm_mode(struct exynos_panel *exynos_panel,
 				 bool local_hbm_en)
 {
+	const struct exynos_panel_mode *pmode;
+
 	if (exynos_panel->hbm.local_hbm.enabled == local_hbm_en)
 		return;
+
+	pmode = exynos_panel->current_mode;
+	if (unlikely(pmode == NULL)) {
+		dev_err(exynos_panel->dev, "%s: unknown current mode\n", __func__);
+		return;
+	}
+	if (local_hbm_en) {
+		const int vrefresh = drm_mode_vrefresh(&pmode->mode);
+		/* Add check to turn on LHBM @ 90hz only */
+		if (vrefresh != 90) {
+			dev_err(exynos_panel->dev,
+				"unexpected mode `%s` while enabling LHBM, give up\n",
+				pmode->mode.name);
+			return;
+		}
+	}
 
 	exynos_panel->hbm.local_hbm.enabled = local_hbm_en;
 	s6e3fc3_update_wrctrld(exynos_panel);
@@ -446,30 +472,37 @@ static bool s6e3fc3_is_mode_seamless(const struct exynos_panel *ctx,
 	return drm_mode_equal_no_clocks(&ctx->current_mode->mode, &pmode->mode);
 }
 
-static void s6e3fc3_panel_init(struct exynos_panel *ctx)
+static void s6e3fc3_debugfs_init(struct drm_panel *panel, struct dentry *root)
 {
-	struct dentry *csroot = ctx->debugfs_cmdset_entry;
+	struct exynos_panel *ctx = container_of(panel, struct exynos_panel, panel);
+	struct dentry *csroot = debugfs_lookup("cmdsets", root);
+
+	if (!csroot || !ctx)
+		return;
 
 	exynos_panel_debugfs_create_cmdset(ctx, csroot,
 					   &s6e3fc3_init_cmd_set, "init");
+	dput(csroot);
+}
 
+static void s6e3fc3_panel_init(struct exynos_panel *ctx)
+{
 	if (ctx->panel_rev >= PANEL_REV_EVT1_1)
 		if (!s6e3fc3_lhbm_gamma_read(ctx))
 			s6e3fc3_lhbm_gamma_write(ctx);
 }
 
-static u32 s6e3fc3_get_panel_rev(u32 id)
+static void s6e3fc3_get_panel_rev(struct exynos_panel *ctx, u32 id)
 {
-	u8 build_code;
-
 	/* extract command 0xDB */
-	build_code = (id & 0xFF00) >> 8;
+	u8 build_code = (id & 0xFF00) >> 8;
+	u8 rev = ((build_code & 0xE0) >> 3) | ((build_code & 0x0C) >> 2);
 
-	return (((build_code & 0xE0) >> 3) | ((build_code & 0x0C) >> 2));
+	exynos_panel_get_panel_rev(ctx, rev);
 }
 
 static const struct exynos_display_underrun_param underrun_param = {
-	.te_idle_us = 1000,
+	.te_idle_us = 700,
 	.te_var = 1,
 };
 
@@ -497,6 +530,7 @@ static const struct exynos_panel_mode s6e3fc3_modes[] = {
 		.exynos_mode = {
 			.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
 			.vblank_usec = 120,
+			.te_usec = 5630,
 			.bpc = 8,
 			.dsc = {
 				.enabled = true,
@@ -530,6 +564,7 @@ static const struct exynos_panel_mode s6e3fc3_modes[] = {
 		.exynos_mode = {
 			.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
 			.vblank_usec = 120,
+			.te_usec = 140,
 			.bpc = 8,
 			.dsc = {
 				.enabled = true,
@@ -585,6 +620,7 @@ static const struct drm_panel_funcs s6e3fc3_drm_funcs = {
 	.prepare = exynos_panel_prepare,
 	.enable = s6e3fc3_enable,
 	.get_modes = exynos_panel_get_modes,
+	.debugfs_init = s6e3fc3_debugfs_init,
 };
 
 static const struct exynos_panel_funcs s6e3fc3_exynos_funcs = {
@@ -644,8 +680,8 @@ const struct exynos_panel_desc samsung_s6e3fc3 = {
 	.dft_brightness = 1023,
 	.brt_capability = &s6e3fc3_brightness_capability,
 	/* supported HDR format bitmask : 1(DOLBY_VISION), 2(HDR10), 3(HLG) */
-	.hdr_formats = BIT(2),
-	.max_luminance = 5400000,
+	.hdr_formats = BIT(2) | BIT(3),
+	.max_luminance = 8000000,
 	.max_avg_luminance = 1200000,
 	.min_luminance = 5,
 	.bl_range = s6e3fc3_bl_range,
