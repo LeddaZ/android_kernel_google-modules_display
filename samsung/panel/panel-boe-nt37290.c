@@ -769,8 +769,12 @@ static bool nt37290_set_self_refresh(struct exynos_panel *ctx, bool enable)
 		return false;
 
 	/* self refresh is not supported in lp mode since that always makes use of early exit */
-	if (pmode->exynos_mode.is_lp_mode)
+	if (pmode->exynos_mode.is_lp_mode) {
+		/* set 10Hz while self refresh is active, otherwise clear it */
+		ctx->panel_idle_vrefresh = enable ? 10 : 0;
+		backlight_state_changed(ctx->bl);
 		return false;
+	}
 
 	/* do not change frequency when LHBM is enabled */
 	if (ctx->hbm.local_hbm.enabled) {

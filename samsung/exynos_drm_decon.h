@@ -89,7 +89,8 @@ struct dpu_bts_win_config {
 	bool is_rot;
 	bool is_comp;
 	bool is_secure;
-	int dpp_ch;
+	u32 dpp_id;
+	u32 zpos;
 	u32 format;
 	u64 comp_src;
 };
@@ -208,6 +209,7 @@ enum dpu_event_type {
 	DPU_EVT_DSIM_PL_FIFO_TIMEOUT,
 
 	DPU_EVT_DPP_FRAMEDONE,
+	DPU_EVT_DPP_SET_PROTECTION,
 	DPU_EVT_DMA_RECOVERY,
 
 	DPU_EVT_IDMA_AFBC_CONFLICT,
@@ -299,6 +301,8 @@ struct dpu_log_dpp {
 	u32 win_id;
 	u64 comp_src;
 	u32 recovery_cnt;
+	pid_t last_secure_pid; /* record last PID which wrote mst_security */
+	bool mst_security;
 };
 
 struct dpu_log_win {
@@ -308,8 +312,8 @@ struct dpu_log_win {
 };
 
 struct dpu_log_rsc_occupancy {
-	u32 rsc_ch;
-	u32 rsc_win;
+	u64 rsc_ch;
+	u64 rsc_win;
 };
 
 struct dpu_log_atomic {
@@ -476,6 +480,7 @@ struct decon_device {
 	int				irq_te;
 	int				irq_ds;	/* dimming start irq number */
 	int				irq_de;	/* dimming end irq number */
+	int				te_gpio;
 	atomic_t			te_ref;
 	struct completion te_rising; /* signaled when irq_te is triggered */
 

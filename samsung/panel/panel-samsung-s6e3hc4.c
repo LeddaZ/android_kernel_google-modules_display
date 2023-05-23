@@ -585,8 +585,12 @@ static bool s6e3hc4_set_self_refresh(struct exynos_panel *ctx, bool enable)
 		return false;
 
 	/* self refresh is not supported in lp mode since that always makes use of early exit */
-	if (pmode->exynos_mode.is_lp_mode)
+	if (pmode->exynos_mode.is_lp_mode) {
+		/* set 10Hz while self refresh is active, otherwise clear it */
+		ctx->panel_idle_vrefresh = enable ? 10 : 0;
+		backlight_state_changed(ctx->bl);
 		return false;
+	}
 
 	idle_vrefresh = s6e3hc4_get_min_idle_vrefresh(ctx, pmode);
 
@@ -942,7 +946,6 @@ static const struct exynos_dsi_cmd s6e3hc4_init_cmds[] = {
 	/* Delete Toggle */
 	EXYNOS_DSI_CMD_SEQ(0xB0, 0x00, 0x58, 0x94),
 	EXYNOS_DSI_CMD_SEQ(0x94, 0x0C, 0x60, 0x0C, 0x60),
-	EXYNOS_DSI_CMD0(sync_begin),
 	/* VLIN1 7.9V */
 	EXYNOS_DSI_CMD_SEQ(0xB0, 0x00, 0x12, 0xB1),
 	EXYNOS_DSI_CMD_SEQ(0xB1, 0x08),
@@ -952,7 +955,6 @@ static const struct exynos_dsi_cmd s6e3hc4_init_cmds[] = {
 	/* VREG 4.5V */
 	EXYNOS_DSI_CMD_SEQ(0xB0, 0x00, 0x31, 0xF4),
 	EXYNOS_DSI_CMD_SEQ(0xF4, 0x00, 0x00, 0x00, 0x00, 0x00),
-	EXYNOS_DSI_CMD0(sync_end),
 	EXYNOS_DSI_CMD(lock_cmd_f0, 110),
 
 	/* Enable TE*/

@@ -515,10 +515,11 @@ static void commit_tail(struct drm_atomic_state *old_state)
 
 static void commit_kthread_work(struct kthread_work *work)
 {
-	struct exynos_drm_priv_state *exynos_priv_state =
-		container_of(work, struct exynos_drm_priv_state, commit_work);
-	struct drm_atomic_state *old_state = exynos_priv_state->old_state;
+	struct exynos_drm_crtc_state *old_exynos_crtc_state =
+		container_of(work, struct exynos_drm_crtc_state, commit_work);
+	struct drm_atomic_state *old_state = old_exynos_crtc_state->base.state;
 
+	BUG_ON(!old_state);
 	commit_tail(old_state);
 }
 
@@ -530,8 +531,7 @@ static void commit_work(struct work_struct *work)
 	commit_tail(old_state);
 }
 
-static void exynos_atomic_queue_work(struct drm_atomic_state *old_state, bool nonblock,
-				     struct kthread_work *work)
+static void exynos_atomic_queue_work(struct drm_atomic_state *old_state)
 {
 	struct drm_crtc *crtc;
 	struct drm_crtc_state *old_crtc_state;
@@ -544,10 +544,10 @@ static void exynos_atomic_queue_work(struct drm_atomic_state *old_state, bool no
 	 * TODO: can work be split per display?
 	 */
 	for_each_old_crtc_in_state(old_state, crtc, old_crtc_state, i) {
-		struct exynos_drm_crtc *exynos_crtc =
-			container_of(crtc, struct exynos_drm_crtc, base);
-		struct decon_device *decon = exynos_crtc->ctx;
+		struct decon_device *decon = crtc_to_decon(crtc);
+		struct kthread_work *work = &to_exynos_crtc_state(old_crtc_state)->commit_work;
 
+		kthread_init_work(work, commit_kthread_work);
 		kthread_queue_work(&decon->worker, work);
 
 		return;
@@ -560,7 +560,6 @@ static void exynos_atomic_queue_work(struct drm_atomic_state *old_state, bool no
 
 int exynos_atomic_commit(struct drm_device *dev, struct drm_atomic_state *state, bool nonblock)
 {
-	struct exynos_drm_priv_state *exynos_priv_state;
 	struct drm_crtc *crtc;
 	struct drm_crtc_state *old_crtc_state;
 	int i, ret;
@@ -589,15 +588,6 @@ int exynos_atomic_commit(struct drm_device *dev, struct drm_atomic_state *state,
 	ret = drm_atomic_helper_setup_commit(state, !stall);
 	if (ret)
 		goto err;
-
-	exynos_priv_state = exynos_drm_get_priv_state(state);
-	if (IS_ERR(exynos_priv_state)) {
-		ret = PTR_ERR(exynos_priv_state);
-		goto err;
-	}
-
-	kthread_init_work(&exynos_priv_state->commit_work, commit_kthread_work);
-	exynos_priv_state->old_state = state;
 
 	ret = drm_atomic_helper_prepare_planes(dev, state);
 	if (ret)
@@ -639,7 +629,7 @@ int exynos_atomic_commit(struct drm_device *dev, struct drm_atomic_state *state,
 	if (!nonblock)
 		commit_tail(state);
 	else
-		exynos_atomic_queue_work(state, nonblock, &exynos_priv_state->commit_work);
+		exynos_atomic_queue_work(state);
 
 err:
 	DPU_ATRACE_END("exynos_atomic_commit");

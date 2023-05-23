@@ -432,6 +432,14 @@ struct exynos_panel_funcs {
 	 * Parse regulators for panel.
 	 */
 	int (*parse_regulators)(struct exynos_panel *ctx);
+
+	/**
+	 * @get_te_usec
+	 *
+	 * This callback is used to get current TE pulse time.
+	 */
+	unsigned int (*get_te_usec)(struct exynos_panel *exynos_panel,
+				    const struct exynos_panel_mode *pmode);
 };
 
 /**
@@ -492,7 +500,6 @@ struct exynos_panel_desc {
 	bool is_partial;
 	bool is_panel_idle_supported;
 	bool no_lhbm_rr_constraints;
-	bool mipi_sync_te_prediction;
 	const u32 lhbm_effective_delay_frames;
 	const unsigned int delay_dsc_reg_init_us;
 	const struct brightness_capability *brt_capability;
@@ -639,6 +646,11 @@ struct exynos_panel {
 	/* Record the last come out lp mode timestamp */
 	ktime_t last_lp_exit_ts;
 	u32 last_rr;
+	/* TE low or high when last rr was sent */
+	int last_rr_te_gpio_value;
+	u64 last_rr_te_counter;
+	/* TE width before last rr command was sent */
+	u32 last_rr_te_usec;
 
 	struct {
 		struct local_hbm {

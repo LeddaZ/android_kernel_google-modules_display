@@ -989,7 +989,7 @@ static void _decon_mode_update_bts_handover(struct decon_device *decon,
 		config->dst_w = mode->hdisplay;
 		config->dst_h = mode->vdisplay;
 		config->format = DRM_FORMAT_ARGB8888;
-		config->dpp_ch = dpp->id;
+		config->dpp_id = dpp->id;
 		j++;
 	}
 }
@@ -1423,6 +1423,7 @@ static void decon_disable(struct exynos_drm_crtc *crtc)
 				disable_irq(decon->irq_te);
 			devm_free_irq(decon->dev, decon->irq_te, decon);
 			decon->irq_te = -1;
+			decon->te_gpio = 0;
 		}
 	}
 
@@ -1516,7 +1517,7 @@ static int dpu_sysmmu_fault_handler(struct iommu_fault *fault, void *data)
 {
 	struct decon_device *decon = data;
 
-	if (!decon)
+	if (!decon || !decon_is_effectively_active(decon))
 		return 0;
 
 	DPU_EVENT_LOG(DPU_EVT_SYSMMU_FAULT, decon->id, NULL);
@@ -2012,8 +2013,16 @@ static irqreturn_t decon_te_irq_handler(int irq, void *dev_id)
 				decon->state != DECON_STATE_HIBERNATION)
 		goto end;
 
+	if (decon->d.force_te_on && decon->te_gpio > 0) {
+		bool level = gpio_get_value(decon->te_gpio);
+
+		DPU_ATRACE_INT_PID("TE", level, decon->thread->pid);
+		if (!level)
+			goto end;
+	} else {
+		DPU_ATRACE_INT_PID("TE", decon->d.te_cnt++ & 1, decon->thread->pid);
+	}
 	DPU_EVENT_LOG(DPU_EVT_TE_INTERRUPT, decon->id, NULL);
-	DPU_ATRACE_INT_PID("TE", decon->d.te_cnt++ & 1, decon->thread->pid);
 
 	if (decon->config.dsc.delay_reg_init_us)
 		complete_all(&decon->te_rising);
@@ -2030,6 +2039,7 @@ static int decon_request_te_irq(struct exynos_drm_crtc *exynos_crtc,
 {
 	struct decon_device *decon = exynos_crtc->ctx;
 	int ret, irq;
+	unsigned long flags = IRQF_TRIGGER_RISING;
 
 	if (WARN_ON(!exynos_conn_state))
 		return -EINVAL;
@@ -2037,10 +2047,14 @@ static int decon_request_te_irq(struct exynos_drm_crtc *exynos_crtc,
 	WARN(decon->irq_te >= 0, "unbalanced te irq\n");
 
 	irq = gpio_to_irq(exynos_conn_state->te_gpio);
+	if (decon->d.force_te_on && exynos_conn_state->te_gpio > 0) {
+		flags |= IRQF_TRIGGER_FALLING;
+		decon->te_gpio = exynos_conn_state->te_gpio;
+	}
 
 	decon_debug(decon, "TE irq number(%d)\n", irq);
 	irq_set_status_flags(irq, IRQ_DISABLE_UNLAZY);
-	ret = devm_request_irq(decon->dev, irq, decon_te_irq_handler, IRQF_TRIGGER_RISING,
+	ret = devm_request_irq(decon->dev, irq, decon_te_irq_handler, flags,
 			       exynos_crtc->base.name, decon);
 	if (!ret) {
 		decon->irq_te = irq;

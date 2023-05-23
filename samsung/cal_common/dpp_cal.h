@@ -252,6 +252,7 @@ void cgc_reg_set_config(u32 id, bool en, dma_addr_t addr);
 void cgc_reg_set_cgc_start(u32 id);
 
 void dma_reg_get_shd_addr(u32 id, u32 shd_addr[], const unsigned long attr);
+bool dma_reg_is_mst_security_enabled(u32 id, u32 *out_mst_security);
 
 #ifdef __linux__
 struct dpp_device;
