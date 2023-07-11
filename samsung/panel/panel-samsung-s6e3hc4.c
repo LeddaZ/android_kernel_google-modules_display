@@ -888,6 +888,8 @@ static void s6e3hc4_panel_set_lp_mode(struct exynos_panel *ctx,
 		EXYNOS_DCS_BUF_ADD(ctx, 0xB0, 0x01, 0x7D, 0x94);
 		EXYNOS_DCS_BUF_ADD(ctx, 0x94, 0x1C);
 	}
+	/* Fixed TE: sync on */
+	EXYNOS_DCS_BUF_ADD(ctx, 0xB9, 0x51);
 	/* Set freq at 30 Hz */
 	EXYNOS_DCS_BUF_ADD(ctx, 0xB0, 0x00, 0x01, 0x60);
 	EXYNOS_DCS_BUF_ADD(ctx, 0x60, 0x00);
