@@ -26,6 +26,13 @@ struct exynos_dqe_funcs {
 			u32 width, u32 height);
 };
 
+enum histogram_run_state {
+	HSTATE_DISABLED,		/* histogram is disabled */
+	HSTATE_HIBERNATION,		/* histogram is disabled due hibernation */
+	HSTATE_PENDING_FRAMEDONE,	/* histogram is enabled, can be read on frame done */
+	HSTATE_IDLE,			/* histogram is enabled, can be read at any time*/
+};
+
 struct exynos_dqe_state {
 	const struct drm_color_lut *degamma_lut;
 	const struct exynos_matrix *linear_matrix;
@@ -35,15 +42,18 @@ struct exynos_dqe_state {
 	struct dither_config *disp_dither_config;
 	struct dither_config *cgc_dither_config;
 	bool enabled;
+	bool rcd_enabled;
+	struct drm_gem_object *cgc_gem;
+	spinlock_t histogram_slock;
+	struct exynos_drm_pending_histogram_event *event;
 	struct histogram_roi *roi;
 	struct histogram_weights *weights;
 	struct histogram_bins *bins;
-	struct exynos_drm_pending_histogram_event *event;
 	u32 histogram_threshold;
-	spinlock_t histogram_slock;
 	enum exynos_prog_pos histogram_pos;
-	bool rcd_enabled;
-	struct drm_gem_object *cgc_gem;
+	enum histogram_state hist_state;
+	enum histogram_run_state hist_run_state;
+	struct histogram_bins histogram_cached_bins;
 };
 
 struct dither_debug_override {
@@ -151,6 +161,7 @@ void handle_histogram_event(struct exynos_dqe *dqe);
 void exynos_dqe_update(struct exynos_dqe *dqe, struct exynos_dqe_state *state,
 			u32 width, u32 height);
 void exynos_dqe_reset(struct exynos_dqe *dqe);
+void exynos_dqe_hibernation_enter(struct exynos_dqe *dqe);
 struct exynos_dqe *exynos_dqe_register(struct decon_device *decon);
 void exynos_dqe_save_lpd_data(struct exynos_dqe *dqe);
 void exynos_dqe_restore_lpd_data(struct exynos_dqe *dqe);
